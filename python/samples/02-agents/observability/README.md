@@ -24,7 +24,9 @@ Next to what happens in the code when you run, we also make setting up observabi
 
 ### MCP trace propagation
 
-Whenever there is an active OpenTelemetry span context, Agent Framework automatically propagates trace context to MCP servers via the `params._meta` field of `tools/call` requests. It uses the globally-configured OpenTelemetry propagator(s) (W3C Trace Context by default, producing `traceparent` and `tracestate`), so custom propagators (B3, Jaeger, etc.) are also supported. This enables distributed tracing across agent-to-MCP-server boundaries for all transports (stdio, HTTP, WebSocket), compliant with the [MCP `_meta` specification](https://modelcontextprotocol.io/specification/2025-11-25/basic#_meta).
+Whenever there is an active OpenTelemetry span context, Agent Framework automatically propagates trace context to MCP servers via the `params._meta` field of `tools/call` requests. It uses the globally-configured OpenTelemetry propagator(s) (W3C Trace Context by default, producing `traceparent` and `tracestate`), so custom propagators (B3, Jaeger, etc.) are also supported. This enables distributed tracing across agent-to-MCP-server boundaries, compliant with the [MCP `_meta` specification](https://modelcontextprotocol.io/specification/2025-11-25/basic#_meta).
+
+**Scope:** automatic `_meta` injection applies only to MCP sessions that the agent process itself opens — `MCPStreamableHTTPTool`, `MCPStdioTool`, and `MCPWebsocketTool` (or any other client-opened `MCPTool` subclass). It does **not** apply to hosted/provider-managed MCP tool configurations such as `FoundryChatClient.get_mcp_tool(...)`, `OpenAIChatClient.get_mcp_tool(...)`, `AnthropicClient.get_mcp_tool(...)`, `GeminiChatClient.get_mcp_tool(...)`, or toolbox-fetched tools (for example, `toolbox = await client.get_toolbox(...)`, then passing `toolbox.tools` into `Agent(tools=...)`), because in those cases the `tools/call` message is issued by the provider service runtime rather than by the agent process. As a result, the framework has no opportunity to inject trace context into those requests, and propagating `traceparent`/`tracestate` across that hosted-service boundary is the responsibility of the service runtime, not Agent Framework. If end-to-end distributed tracing to the downstream MCP server is required, use a client-opened MCP transport instead of a hosted connector.
 
 ### Five patterns for configuring observability
 
@@ -88,18 +90,20 @@ configure_azure_monitor(
 # This is optional if ENABLE_INSTRUMENTATION and or ENABLE_SENSITIVE_DATA are set in env vars
 enable_instrumentation(enable_sensitive_data=False)
 ```
-For Azure AI projects, use the `client.configure_azure_monitor()` method which wraps the calls to `configure_azure_monitor()` and `enable_instrumentation()`:
+For Microsoft Foundry projects, use `client.configure_azure_monitor()` which retrieves the connection string from the project and configures everything:
 
 ```python
-from agent_framework.azure import AzureAIClient
-from azure.ai.projects.aio import AIProjectClient
+from agent_framework.foundry import FoundryChatClient
+from azure.identity import AzureCliCredential
 
-async with (
-    AIProjectClient(...) as project_client,
-    AzureAIClient(project_client=project_client) as client,
-):
-    # Automatically configures Azure Monitor with connection string from project
-    await client.configure_azure_monitor(enable_live_metrics=True)
+client = FoundryChatClient(
+    project_endpoint="https://your-project.services.ai.azure.com",
+    model="gpt-4o",
+    credential=AzureCliCredential(),
+)
+
+# Automatically configures Azure Monitor with connection string from project
+await client.configure_azure_monitor(enable_sensitive_data=True)
 ```
 
 Or with [Langfuse](https://langfuse.com/integrations/frameworks/microsoft-agent-framework):
@@ -227,8 +231,7 @@ This folder contains different samples demonstrating how to use telemetry in var
 | [configure_otel_providers_with_parameters.py](./configure_otel_providers_with_parameters.py) | **Recommended starting point**: Shows how to create custom exporters with specific configuration and pass them to `configure_otel_providers()`. Useful for advanced scenarios. |
 | [configure_otel_providers_with_env_var.py](./configure_otel_providers_with_env_var.py) | Shows how to setup telemetry using standard OpenTelemetry environment variables (`OTEL_EXPORTER_OTLP_*`). |
 | [agent_observability.py](./agent_observability.py) | Shows telemetry collection for an agentic application with tool calls using environment variables. |
-| [agent_with_foundry_tracing.py](./agent_with_foundry_tracing.py) | Shows Azure Monitor integration with Foundry for any chat client. |
-| [azure_ai_agent_observability.py](./azure_ai_agent_observability.py) | Shows Azure Monitor integration for a AzureAIClient. |
+| [foundry_tracing.py](./foundry_tracing.py) | Shows Azure Monitor integration with Foundry for any chat client. |
 | [advanced_manual_setup_console_output.py](./advanced_manual_setup_console_output.py) | Advanced: Shows manual setup of exporters and providers with console output. Useful for understanding how observability works under the hood. |
 | [advanced_zero_code.py](./advanced_zero_code.py) | Advanced: Shows zero-code telemetry setup using the `opentelemetry-enable_instrumentation` CLI tool. |
 | [workflow_observability.py](./workflow_observability.py) | Shows telemetry collection for a workflow with multiple executors and message passing. |
@@ -346,27 +349,29 @@ setup_observability(
 ```
 
 **After (Current):**
-```python
-# For Azure AI projects
-from agent_framework.azure import AzureAIClient
-from azure.ai.projects.aio import AIProjectClient
 
-async with (
-    AIProjectClient(...) as project_client,
-    AzureAIClient(project_client=project_client) as client,
-):
+```python
+from agent_framework.foundry import FoundryChatClient
+from agent_framework.observability import create_resource, enable_instrumentation
+from azure.identity import AzureCliCredential
+from azure.monitor.opentelemetry import configure_azure_monitor
+
+async def main():
+    # For Microsoft Foundry projects
+    client = FoundryChatClient(
+        project_endpoint="https://your-project.services.ai.azure.com",
+        model="gpt-4o",
+        credential=AzureCliCredential(),
+    )
     await client.configure_azure_monitor(enable_live_metrics=True)
 
-# For non-Azure AI projects
-from azure.monitor.opentelemetry import configure_azure_monitor
-from agent_framework.observability import create_resource, enable_instrumentation
-
-configure_azure_monitor(
-    connection_string="InstrumentationKey=...",
-    resource=create_resource(),
-    enable_live_metrics=True,
-)
-enable_instrumentation()
+    # For non-Azure AI projects
+    configure_azure_monitor(
+        connection_string="InstrumentationKey=...",
+        resource=create_resource(),
+        enable_live_metrics=True,
+    )
+    enable_instrumentation()
 ```
 
 ### Console Output

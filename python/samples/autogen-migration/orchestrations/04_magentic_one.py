@@ -5,6 +5,7 @@ import json
 from typing import cast
 
 from agent_framework import (
+    Agent,
     AgentResponseUpdate,
     Message,
     WorkflowEvent,
@@ -75,22 +76,25 @@ async def run_agent_framework() -> None:
     from agent_framework.openai import OpenAIChatClient
     from agent_framework.orchestrations import MagenticBuilder
 
-    client = OpenAIChatClient(model_id="gpt-4.1-mini")
+    client = OpenAIChatClient(model="gpt-4.1-mini")
 
     # Create specialized agents
-    researcher = client.as_agent(
+    researcher = Agent(
+        client=client,
         name="researcher",
         instructions="You are a research analyst. Gather and analyze information.",
         description="Research analyst for data gathering",
     )
 
-    coder = client.as_agent(
+    coder = Agent(
+        client=client,
         name="coder",
         instructions="You are a programmer. Write code based on requirements.",
         description="Software developer for implementation",
     )
 
-    reviewer = client.as_agent(
+    reviewer = Agent(
+        client=client,
         name="reviewer",
         instructions="You are a code reviewer. Review code for quality and correctness.",
         description="Code reviewer for quality assurance",
@@ -99,7 +103,8 @@ async def run_agent_framework() -> None:
     # Create Magentic workflow
     workflow = MagenticBuilder(
         participants=[researcher, coder, reviewer],
-        manager_agent=client.as_agent(
+        manager_agent=Agent(
+            client=client,
             name="magentic_manager",
             instructions="You coordinate a team to complete complex tasks efficiently.",
             description="Orchestrator for team coordination",

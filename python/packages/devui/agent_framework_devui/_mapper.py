@@ -770,9 +770,9 @@ class MessageMapper:
         from .models._openai_custom import AgentCompletedEvent, AgentFailedEvent, AgentStartedEvent
 
         try:
-            # Get model name from request or use 'devui' as default
+            # Get model from request or use 'devui' as default
             request_obj = context.get("request")
-            model_name = request_obj.model if request_obj and request_obj.model else "devui"
+            model = request_obj.model if request_obj and request_obj.model else "devui"
 
             if isinstance(event, AgentStartedEvent):
                 execution_id = f"agent_{uuid4().hex[:12]}"
@@ -783,7 +783,7 @@ class MessageMapper:
                     id=f"resp_{execution_id}",
                     object="response",
                     created_at=float(time.time()),
-                    model=model_name,
+                    model=model,
                     output=[],
                     status="in_progress",
                     parallel_tool_calls=False,
@@ -818,7 +818,7 @@ class MessageMapper:
                     id=f"resp_{execution_id}",
                     object="response",
                     created_at=float(time.time()),
-                    model=model_name,
+                    model=model,
                     output=[],
                     status="failed",
                     error=response_error,
@@ -865,16 +865,16 @@ class MessageMapper:
                 # Return proper OpenAI event objects
                 events: list[Any] = []
 
-                # Get model name from request or use 'devui' as default
+                # Get model from request or use 'devui' as default
                 request_obj = context.get("request")
-                model_name = request_obj.model if request_obj and request_obj.model else "devui"
+                model = request_obj.model if request_obj and request_obj.model else "devui"
 
                 # Create a full Response object with all required fields
                 response_obj = Response(
                     id=f"resp_{workflow_id}",
                     object="response",
                     created_at=float(time.time()),
-                    model=model_name,
+                    model=model,
                     output=[],  # Empty output list initially
                     status="in_progress",
                     # Required fields with safe defaults
@@ -989,9 +989,9 @@ class MessageMapper:
                 # Import Response and ResponseError types
                 from openai.types.responses import Response, ResponseError
 
-                # Get model name from request or use 'devui' as default
+                # Get model from request or use 'devui' as default
                 request_obj = context.get("request")
-                model_name = request_obj.model if request_obj and request_obj.model else "devui"
+                model = request_obj.model if request_obj and request_obj.model else "devui"
 
                 # Extract error message from WorkflowErrorDetails
                 if details:
@@ -1013,7 +1013,7 @@ class MessageMapper:
                     id=f"resp_{workflow_id}",
                     object="response",
                     created_at=float(time.time()),
-                    model=model_name,
+                    model=model,
                     output=[],
                     status="failed",
                     error=response_error,
@@ -1056,6 +1056,7 @@ class MessageMapper:
                         output_index=context["output_index"],
                         sequence_number=self._next_sequence(context),
                         item=executor_item,
+                        created_at=float(time.time()),
                     )
                 ]
 
@@ -1088,6 +1089,7 @@ class MessageMapper:
                         output_index=context.get("output_index", 0),
                         sequence_number=self._next_sequence(context),
                         item=executor_item,
+                        created_at=float(time.time()),
                     )
                 ]
 
@@ -1121,6 +1123,7 @@ class MessageMapper:
                         output_index=context.get("output_index", 0),
                         sequence_number=self._next_sequence(context),
                         item=executor_item,
+                        created_at=float(time.time()),
                     )
                 ]
 
@@ -1744,7 +1747,7 @@ class MessageMapper:
                 # Fallback to direct access if parse_arguments doesn't exist
                 arguments = getattr(content.function_call, "arguments", {})
 
-        return {
+        result = {
             "type": "response.function_approval.requested",
             "request_id": getattr(content, "id", "unknown"),
             "function_call": {
@@ -1756,6 +1759,17 @@ class MessageMapper:
             "output_index": context["output_index"],
             "sequence_number": self._next_sequence(context),
         }
+
+        # Include policy violation details if present (from security middleware)
+        additional_props = cast(dict[str, Any] | None, getattr(content, "additional_properties", None))
+        if additional_props and isinstance(additional_props, dict) and additional_props.get("policy_violation"):
+            result["policy_violation"] = {
+                "reason": additional_props.get("reason", "Policy violation detected"),
+                "violation_type": additional_props.get("violation_type"),
+                "context_label": additional_props.get("context_label"),
+            }
+
+        return result
 
     async def _map_approval_response_content(self, content: Any, context: dict[str, Any]) -> dict[str, Any]:
         """Map FunctionApprovalResponseContent to custom event."""
